@@ -20,6 +20,7 @@
     "build:worker": "vite build -c vite.worker.config.ts",
     "dev:web": "npm run build:worker && vite",
     "dev:rx": "tsx watch src/receiver/server.ts",
+    "events": "tsx src/consumer/watch.ts",
     "build": "npm run build:worker && vite build && tsc src/client/index.ts --ignoreConfig --declaration --emitDeclarationOnly --rootDir src --outDir dist/types --target es2022 --module esnext --moduleResolution bundler --strict --skipLibCheck",
     "test": "vitest run --exclude **/e2e.test.ts",
     "e2e": "npm run assets && npm run build:worker && vitest run test/e2e.test.ts",

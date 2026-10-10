@@ -11,6 +11,7 @@ const AUDIENCE = "xebit-vision";
 const MAX_PEERS = 200;
 const MAX_OFFER_BYTES = 65_536;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+const CONNECT_DEADLINE_MS = 30_000;
 
 export interface ReceiverConfig {
   port: number;
@@ -44,6 +45,23 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ReceiverCon
     icePortRange: range as [number, number] | undefined,
     sink: env.VISION_FORWARD_URL ? webhookSink(env.VISION_FORWARD_URL, env.VISION_FORWARD_SECRET!) : stdoutSink,
   };
+}
+
+/**
+ * False for an SCTP packet holding a chunk or a parameter whose length field is under 4.
+ * Never valid, and werift 0.25.0 loops on it until the process runs out of memory.
+ */
+function lengthsOk(buf: Buffer, pos = 12, end = buf.length, nested = false): boolean {
+  while (pos + 4 <= end) {
+    const type = nested ? 0 : buf[pos];
+    const length = buf.readUInt16BE(pos + 2);
+    if (length < 4) return false;
+    // INIT and INIT ACK carry parameters after 16 fixed bytes; these others carry nothing but parameters.
+    const params = type === 1 || type === 2 ? 20 : [4, 5, 6, 9, 130].includes(type) ? 4 : 0;
+    if (params && !lengthsOk(buf, pos + params, Math.min(pos + length, end), true)) return false;
+    pos += length + ((4 - (length % 4)) % 4);
+  }
+  return true;
 }
 
 async function readOffer(req: IncomingMessage): Promise<{ type: "offer"; sdp: string } | null> {
@@ -97,23 +115,31 @@ export async function startReceiver(cfg: ReceiverConfig) {
     });
     const drop = () => {
       if (!peers.delete(drop)) return;
-      clearTimeout(expiry);
+      clearTimeout(timer);
       pc.close().catch(() => {});
     };
     peers.add(drop);
-    // Closed when the token expires; the client reconnects with a fresh one.
-    const expiry = setTimeout(drop, Math.min(exp * 1000 - Date.now(), MAX_TIMEOUT_MS));
+    // Thirty seconds to open the vision channel: where UDP is blocked the client retries for ever,
+    // and werift never gives up on a peer whose ICE does not finish.
+    let timer = setTimeout(drop, CONNECT_DEADLINE_MS);
     pc.onconnectionstatechange = () => {
       if (["failed", "closed", "disconnected"].includes(pc.connectionState)) drop();
     };
+    const { ingest } = createIngest(identity, cfg.sink, drop); // one per peer, however many channels it opens
     pc.ondatachannel = ({ channel }) => {
       if (channel.label !== "vision") return channel.close();
-      const { ingest } = createIngest(identity, cfg.sink, drop);
+      // From here on the peer lives until its token expires; the client reconnects with a fresh one.
+      clearTimeout(timer);
+      timer = setTimeout(drop, Math.min(exp * 1000 - Date.now(), MAX_TIMEOUT_MS));
       channel.onmessage = (e) => ingest(e.data);
       channel.onclose = drop; // the channel is the peer's only purpose
     };
     try {
       await pc.setRemoteDescription(offer);
+      // werift's private path from DTLS to its SCTP parser; an offer with no data channel has none and ends here.
+      const dtls = (pc.sctpTransport as any).dtlsTransport;
+      const toSctp = dtls.dataReceiver;
+      dtls.dataReceiver = (buf: Buffer) => lengthsOk(buf) && toSctp(buf);
       await pc.setLocalDescription(await pc.createAnswer());
       if (pc.iceGatheringState !== "complete")
         await pc.iceGatheringStateChange.watch((s) => s === "complete", 5000).catch(() => {});
@@ -155,9 +181,11 @@ export async function startReceiver(cfg: ReceiverConfig) {
 
     const who = await verify(req.headers.authorization);
     if (!who) return reply(401, { error: "bad or missing token" });
-    if (peers.size >= MAX_PEERS) return reply(503, { error: "too many peers" });
     const offer = await readOffer(req);
-    const answer = offer && (await accept(offer, who));
+    if (!offer) return reply(400, { error: "not an offer" });
+    // Checked after the last await before accept() adds the peer, so offers arriving together cannot overshoot.
+    if (peers.size >= MAX_PEERS) return reply(503, { error: "too many peers" });
+    const answer = await accept(offer, who);
     if (!answer) return reply(400, { error: "not an offer" });
     reply(200, answer);
   }
@@ -184,5 +212,7 @@ export async function startReceiver(cfg: ReceiverConfig) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cfg = configFromEnv();
   const { port } = await startReceiver(cfg);
+  // werift rejects promises nobody holds when a peer sends bytes it cannot parse. Log it; do not die.
+  process.on("unhandledRejection", (err) => console.error(`unhandled: ${err}`));
   console.error(`xebit-vision receiver on :${port}${cfg.dev ? " (VISION_DEV=1: /dev/token is open)" : ""}`);
 }

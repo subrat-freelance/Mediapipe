@@ -230,8 +230,61 @@ At 2 fps one frame is half a second, so a hold time becomes a frame count:
 
 **The 16 matrix numbers are column-first:** `m[row][col] = data[col * 4 + row]`. The translation is
 `data[12], data[13], data[14]` and `data[3], data[7], data[11], data[15]` are `0, 0, 0, 1` (see the
-example above, from a face looking straight at the camera).
-The sign of each rotation angle has not been checked by turning a head in front of a camera.
+example above, from a face looking straight at the camera). Head yaw is
+`atan2(data[8], data[10])`, **positive toward the person's own left** — confirmed on photographs of
+known head turns and their mirror images. Pitch is `asin(-data[9])`; its up/down sign is not yet
+nailed down (head-up was not tested), so treat large `|pitch|` as "off-centre", not as a direction.
+
+## Events — the rules layer (`src/consumer/`)
+
+The receiver is a dumb pipe; turning the per-frame JSON into events like "hand raised" is the
+consumer's job (plan §2, §13). `src/consumer/rules.ts` does it, and `src/consumer/watch.ts` runs it
+over the receiver's output:
+
+```powershell
+$env:VISION_DEV=1; npm run dev:rx | npx tsx src/consumer/watch.ts events.ndjson
+```
+
+The receiver's logs go to stderr, so its stdout is clean JSONL; `watch.ts` reads it, keeps a
+`Detector` per participant, and writes one line per event to stdout and to `events.ndjson`. An event
+is a **state change**, not per-frame spam:
+
+```json
+{ "type": "event", "event": "hand_raised", "state": "start", "pid": "dev-8a25e55f", "name": "demo", "ts": 1791619200123, "seq": 418, "detail": { "hand": "left" } }
+{ "type": "event", "event": "hand_raised", "state": "end",   "pid": "dev-8a25e55f", "name": "demo", "ts": 1791619203623, "seq": 425 }
+```
+
+`signals(frameMessage)` is pure and returns the raw booleans and angles if you want to apply your own
+logic instead. A condition must hold for a number of frames (2 fps, so one frame is half a second)
+before it fires, and be false for 2 frames before it ends.
+
+| Event | Fires when | Hold | Basis |
+|---|---|---|---|
+| `hand_raised` (`detail.hand`: left/right/both) | a wrist above the eyes and above its own elbow | 3 | pose — **reliable** |
+| `multiple_people` (`detail.faces`) | two or more faces | 6 | face count — **reliable** |
+| `absent` | no face **and** no body | 10 | pose + face — **reliable** |
+| `looking_away` (`detail.yaw`, `pitch`) | head yaw > 25° or pitch > 20° off-centre | 12 | head matrix — reliable for yaw |
+| `hand_to_face` | a wrist within 0.17 of the nose | 4 | pose — proxy (phone-to-ear, chin rest) |
+| `looking_down` | `eyeLookDown` blendshapes high | 6 | gaze — proxy (see below) |
+| `eyes_closed` | `eyeBlink` blendshapes high | 6 | blendshape — untuned |
+| `talking` | `jawOpen` high | 2 | blendshape — untuned |
+
+### "Checking a phone" — what this build can and cannot do
+
+**It cannot detect a phone.** There is no object detector and no hand/finger landmarks in this build —
+the plan left both out on purpose (§2). The nearest signal is `looking_down` (gaze dropped) together
+with `hand_to_face` or a lifted hand, and it **also fires for reading notes, writing, or resting a
+chin on a hand**. Use it as a soft flag, not proof.
+
+For real phone detection you add a **third MediaPipe task** in the worker (plan §6.3): the Object
+Detector (to find a phone in frame) or the Hand Landmarker (21 finger points, for a hand holding
+something at a reading angle). That is one more `createFromOptions` in `worker.ts`, one more key in
+the frame message, one more entry in the schema, and more bandwidth per frame. Say the word and I
+will add it as a separate task.
+
+The thresholds in `rules.ts` (angles, blendshape cut-offs, the 0.17 hand-to-face distance) are
+reasonable defaults measured on stills; **calibrate them against your own camera and distance.**
+`eyes_closed` and `talking` in particular have not been tuned on a live face.
 
 ## Measured
 
