@@ -8,6 +8,12 @@ let pose: PoseLandmarker;
 let face: FaceLandmarker;
 let objectDet: ObjectDetector | undefined; // only when the objects task is on
 
+// The object detector is the slow task (~280 ms). Run it every 2nd frame and carry the result between:
+// a phone does not come and go within half a second, and this halves its average CPU.
+const OBJECT_EVERY = 2;
+let frameNo = 0;
+let lastObjects: { categoryName: string; score: number; box: { x: number; y: number; w: number; h: number } }[] = [];
+
 async function init(delegate: "CPU" | "GPU", objects: boolean) {
   const files = await FilesetResolver.forVisionTasks(`${base}/wasm`);
   // Trap 6: VIDEO mode tracks from the previous frame. If landmarks lag at 2 fps,
@@ -40,22 +46,24 @@ function analyse(bitmap: ImageBitmap, t: number, ts: number) {
     const t0 = performance.now();
     const p = pose.detectForVideo(bitmap, t);
     const f = face.detectForVideo(bitmap, t);
-    const o = objectDet?.detectForVideo(bitmap, t);
+    const o = objectDet && frameNo++ % OBJECT_EVERY === 0 ? objectDet.detectForVideo(bitmap, t) : undefined;
     const infer_ms = performance.now() - t0;
-    // Normalise boxes 0..1 and drop "person" (pose/face already cover people).
-    const objects = o?.detections
-      .filter((d) => d.boundingBox && d.categories[0]?.categoryName !== "person")
-      .map((d) => ({
-        categoryName: d.categories[0].categoryName,
-        score: d.categories[0].score,
-        box: {
-          x: d.boundingBox!.originX / bitmap.width,
-          y: d.boundingBox!.originY / bitmap.height,
-          w: d.boundingBox!.width / bitmap.width,
-          h: d.boundingBox!.height / bitmap.height,
-        },
-      }))
-      .slice(0, 10);
+    // Normalise boxes 0..1 and drop "person" (pose/face already cover people). Cache between runs.
+    if (o)
+      lastObjects = o.detections
+        .filter((d) => d.boundingBox && d.categories[0]?.categoryName !== "person")
+        .map((d) => ({
+          categoryName: d.categories[0].categoryName,
+          score: d.categories[0].score,
+          box: {
+            x: d.boundingBox!.originX / bitmap.width,
+            y: d.boundingBox!.originY / bitmap.height,
+            w: d.boundingBox!.width / bitmap.width,
+            h: d.boundingBox!.height / bitmap.height,
+          },
+        }))
+        .slice(0, 10);
+    const objects = objectDet ? lastObjects : undefined;
     // Fields picked out by name: the results are class instances and may hold masks.
     return {
       type: "result",

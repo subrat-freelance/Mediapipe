@@ -268,7 +268,7 @@ before it fires, and be false for 2 frames before it ends.
 | `looking_away` (`detail.yaw`, `pitch`) | head yaw > 25° or pitch > 20° off-centre | 12 | head matrix — reliable for yaw |
 | `hand_to_face` | a wrist within 0.17 of the nose | 4 | pose — proxy (phone-to-ear, chin rest) |
 | `looking_down` | `eyeLookDown` blendshapes high | 6 | gaze — proxy |
-| `eyes_closed` | `eyeBlink` blendshapes high | 6 | blendshape — untuned |
+| `eyes_closed` | **both** eyes' `eyeBlink` > 0.6 | 6 | blendshape (min of both, so looking down doesn't trip it) |
 | `talking` | `jawOpen` high | 2 | blendshape — untuned |
 
 ### Phone and object detection (the third task)
@@ -290,9 +290,11 @@ small, edge-on or mostly hidden by the hand can score low or be missed (one of m
 phone held flat and far, was missed at 320 px). For a stricter signal, combine `phone` with
 `looking_down` / `hand_to_face`.
 
-**Cost:** the objects task adds a one-time **7.5 MB** model download and about **280–300 ms of CPU a
-frame** (so a full frame is ~340 ms with objects on vs ~85 ms off). It still fits the 500 ms budget at
-2 fps on this laptop, but on a slower machine it will pull the whole pipeline below 2 fps — turn it off
+**Cost:** the objects task adds a one-time **7.5 MB** model download and about **280–300 ms of CPU**
+when it runs. It runs **every other frame** (so object detection is ~1 fps) and the result is carried
+to the frame between — a phone does not appear and vanish in half a second. So one frame in two is
+~340 ms and the other ~65 ms (median ~65, average ~200). The slow frame still fits the 500 ms budget at
+2 fps on this laptop; on a slower machine it will pull the pipeline below 2 fps, so turn it off
 (`objects: false`, the default) to keep pose and face at full rate.
 
 The thresholds in `rules.ts` (angles, blendshape cut-offs, the 0.17 hand-to-face distance, the 0.35

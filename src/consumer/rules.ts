@@ -13,7 +13,9 @@ const YAW_AWAY_DEG = 25; // head turned off-centre, + = toward the person's own 
 const PITCH_AWAY_DEG = 20; // head tilted up or down off-centre
 const HAND_TO_FACE = 0.17; // wrist-to-nose distance, fraction of frame, for a hand at the face
 const GAZE_DOWN = 0.5; // eyeLookDown blendshape, averaged over both eyes
-const EYES_CLOSED = 0.5; // eyeBlink blendshape
+// eyeBlink of BOTH eyes. Looking down lifts one eye's eyeBlink to ~0.5–0.7 with eyes open, so the
+// average over-fires; a real closure shuts both hard (~0.9). Require the smaller of the two over 0.6.
+const EYES_CLOSED = 0.6;
 const JAW_OPEN = 0.4; // mouth open on this frame (one frame of speech)
 const PHONE_SCORE = 0.35; // object-detector score for a "cell phone" (hand-held phones score ~0.3–0.8)
 
@@ -55,7 +57,7 @@ export function signals(msg: FrameMessage): Signals {
   const yaw = m ? deg(Math.atan2(m[8], m[10])) : 0;
   const pitch = m ? deg(Math.asin(clamp(-m[9], -1, 1))) : 0;
   const gazeDown = (blend(msg.face, "eyeLookDownLeft") + blend(msg.face, "eyeLookDownRight")) / 2 > GAZE_DOWN;
-  const eyesClosed = (blend(msg.face, "eyeBlinkLeft") + blend(msg.face, "eyeBlinkRight")) / 2 > EYES_CLOSED;
+  const eyesClosed = Math.min(blend(msg.face, "eyeBlinkLeft"), blend(msg.face, "eyeBlinkRight")) > EYES_CLOSED;
 
   return {
     present: faces > 0,
