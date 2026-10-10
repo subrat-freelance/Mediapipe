@@ -1,3 +1,6 @@
 node_modules/
 dist/
 public/vision/
+
+# event-log output from watch.ts
+events.ndjson
