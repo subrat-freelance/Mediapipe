@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xebit-vision demo</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { color-scheme: light dark; font: 14px/1.4 system-ui, sans-serif; }
+      body { margin: 0; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(280px, 640px) minmax(280px, 1fr); align-items: start; }
+      @media (max-width: 800px) { body { grid-template-columns: 1fr; } }
+      .stage { position: relative; background: #000; aspect-ratio: 4 / 3; }
+      .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 12px; }
+      .controls input[type="text"] { flex: 1; min-width: 200px; font: inherit; padding: 4px 6px; }
+      button { font: inherit; padding: 4px 16px; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16px; margin: 0 0 12px; font-variant-numeric: tabular-nums; }
+      dt { opacity: 0.7; }
+      dd { margin: 0; }
+      pre { margin: 0; padding: 8px; max-height: 70vh; overflow: auto; font: 12px/1.35 ui-monospace, Consolas, monospace; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
+    </style>
+  </head>
+  <body>
+    <section>
+      <div class="stage">
+        <video id="preview" muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls">
+        <button id="toggle">Start</button>
+        <label><input id="draw" type="checkbox" checked /> Draw landmarks</label>
+        <label><input id="mesh" type="checkbox" /> Face mesh</label>
+      </div>
+      <div class="controls">
+        <label for="rx">Receiver</label>
+        <input id="rx" type="text" placeholder="http://localhost:8787 — empty: count only, send nowhere" />
+      </div>
+    </section>
+    <section>
+      <dl>
+        <dt>State</dt><dd id="state">idle</dd>
+        <dt>Receiver</dt><dd id="link">—</dd>
+        <dt>Sent / dropped</dt><dd id="counts">0 / 0</dd>
+        <dt>Frames per second</dt><dd id="fps">—</dd>
+        <dt>Last infer_ms</dt><dd id="infer">—</dd>
+        <dt>Last message</dt><dd id="bytes">—</dd>
+        <dt>Bytes per second</dt><dd id="bps">—</dd>
+        <dt>Poses / faces</dt><dd id="people">—</dd>
+      </dl>
+      <pre id="json"></pre>
+    </section>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
