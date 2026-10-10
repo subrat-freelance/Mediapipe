@@ -21,6 +21,8 @@ export interface VisionOptions {
   /** Width of the analysed image; height follows the camera's aspect ratio. */
   width?: number;
   faceMesh?: boolean;
+  /** Detect objects (a phone, a book, …) with a third task. Adds a ~23 MB model and CPU per frame. */
+  objects?: boolean;
   maxBytes?: number;
   delegate?: "CPU" | "GPU";
   /** Local tap: every message, as an object, before rounding. */
@@ -32,9 +34,11 @@ export async function startVision(opts: VisionOptions): Promise<{ stop(): void }
   const fps = Math.min(Math.max(opts.fps ?? 2, 0.1), MAX_FPS);
   const width = opts.width ?? 320;
   const faceMesh = opts.faceMesh ?? false;
+  const objects = opts.objects ?? false;
   const maxBytes = opts.maxBytes ?? MAX_MESSAGE_BYTES;
   const delegate = opts.delegate ?? "CPU";
-  const engine = { lib: __MP_VERSION__, tasks: ["pose", "face"], fps, width, delegate, faceMesh };
+  const tasks = ["pose", "face", ...(objects ? ["objects"] : [])];
+  const engine = { lib: __MP_VERSION__, tasks, fps, width, delegate, faceMesh };
 
   let seq = 0;
   let state: StatusMessage["state"] = "running";
@@ -85,7 +89,7 @@ export async function startVision(opts: VisionOptions): Promise<{ stop(): void }
     await new Promise<void>((resolve, reject) => {
       worker.onmessage = (e) => (e.data.type === "ready" ? resolve() : reject(new Error(e.data.error)));
       worker.onerror = (e) => reject(new Error(e.message || "worker failed to load"));
-      worker.postMessage({ type: "init", delegate });
+      worker.postMessage({ type: "init", delegate, objects });
     });
   } catch (err) {
     end("failed", "init_error", err);

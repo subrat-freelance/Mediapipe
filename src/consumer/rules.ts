@@ -15,6 +15,7 @@ const HAND_TO_FACE = 0.17; // wrist-to-nose distance, fraction of frame, for a h
 const GAZE_DOWN = 0.5; // eyeLookDown blendshape, averaged over both eyes
 const EYES_CLOSED = 0.5; // eyeBlink blendshape
 const JAW_OPEN = 0.4; // mouth open on this frame (one frame of speech)
+const PHONE_SCORE = 0.35; // object-detector score for a "cell phone" (hand-held phones score ~0.3–0.8)
 
 const deg = (r: number) => (r * 180) / Math.PI;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -35,6 +36,7 @@ export interface Signals {
   gazeDown: boolean; // eyes looking down (proxy for a phone or notes in the lap)
   eyesClosed: boolean;
   talking: boolean;
+  phone: boolean; // a phone was actually detected (needs the objects task on)
 }
 
 /** Everything one frame says about one person. Pure, no history. */
@@ -68,6 +70,7 @@ export function signals(msg: FrameMessage): Signals {
     gazeDown: faces > 0 && gazeDown,
     eyesClosed: faces > 0 && eyesClosed,
     talking: faces > 0 && blend(msg.face, "jawOpen") > JAW_OPEN,
+    phone: (msg.objects ?? []).some((o) => o.categoryName === "cell phone" && o.score > PHONE_SCORE),
   };
 }
 
@@ -98,6 +101,7 @@ const CONDS: Cond[] = [
     hold: 3,
     detail: (s) => ({ hand: s.leftHandRaised && s.rightHandRaised ? "both" : s.leftHandRaised ? "left" : "right" }),
   },
+  { name: "phone", on: (s) => s.phone, hold: 4 }, // a phone actually detected (objects task on)
   { name: "hand_to_face", on: (s) => s.handToFace, hold: 4 },
   { name: "absent", on: (s) => !s.present && !s.body, hold: 10 }, // no face and no body
   { name: "multiple_people", on: (s) => s.faces >= 2, hold: 6, detail: (s) => ({ faces: s.faces }) },

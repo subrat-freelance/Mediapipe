@@ -10,8 +10,10 @@ const overlay = $<HTMLCanvasElement>("overlay");
 const toggle = $<HTMLButtonElement>("toggle");
 const drawBox = $<HTMLInputElement>("draw");
 const meshBox = $<HTMLInputElement>("mesh");
+const objectsBox = $<HTMLInputElement>("objects");
 const rxInput = $<HTMLInputElement>("rx");
-const pen = new DrawingUtils(overlay.getContext("2d")!);
+const ctx = overlay.getContext("2d")!;
+const pen = new DrawingUtils(ctx);
 
 const WINDOW_MS = 5000;
 let stop: (() => void) | undefined;
@@ -40,6 +42,16 @@ function paint(msg: FrameMessage) {
     pen.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: "#00e0ff", lineWidth: 2 });
     pen.drawLandmarks(lm, { color: "#ffcc00", radius: 3 });
   }
+  // Object boxes (normalised → pixels of the preview). A phone is highlighted.
+  for (const o of msg.objects ?? []) {
+    const phone = o.categoryName === "cell phone";
+    ctx.strokeStyle = phone ? "#ff3b3b" : "#8affc1";
+    ctx.lineWidth = phone ? 3 : 2;
+    ctx.strokeRect(o.box.x * overlay.width, o.box.y * overlay.height, o.box.w * overlay.width, o.box.h * overlay.height);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = "14px system-ui";
+    ctx.fillText(`${o.categoryName} ${o.score.toFixed(2)}`, o.box.x * overlay.width + 2, o.box.y * overlay.height - 4);
+  }
 }
 
 /** Everything shown comes from the JSON string handed to send: it is what goes on the wire. */
@@ -63,6 +75,9 @@ function show(json: string, ok: boolean) {
   } else {
     $("infer").textContent = `${msg.infer_ms} ms`;
     $("people").textContent = `${msg.pose.landmarks.length} / ${msg.face.faceBlendshapes.length}`;
+    $("objects-out").textContent = msg.objects
+      ? msg.objects.map((o) => `${o.categoryName} ${o.score.toFixed(2)}`).join(", ") || "none"
+      : "off";
     paint(msg);
   }
 }
@@ -108,6 +123,7 @@ async function start() {
       },
       assetsUrl: "/vision",
       faceMesh: meshBox.checked,
+      objects: objectsBox.checked,
     });
     undo.push(vision.stop);
     stop = () => undo.reverse().forEach((f) => f());
@@ -130,9 +146,12 @@ async function onToggle() {
 }
 
 toggle.onclick = onToggle;
-meshBox.onchange = async () => {
+// Both are start-time options, so a change restarts the engine.
+const restart = async () => {
   if (!stop) return;
-  await onToggle(); // the mesh is a start option: restart
+  await onToggle();
   await onToggle();
 };
+meshBox.onchange = restart;
+objectsBox.onchange = restart;
 if (query.get("autostart") === "1") void onToggle();

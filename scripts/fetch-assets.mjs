@@ -15,6 +15,9 @@ const WASM = [
 const MODELS = [
   ["pose_landmarker_lite.task", 5_777_746, "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"],
   ["face_landmarker.task", 3_758_596, "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"],
+  // EfficientDet-Lite2 int8 (COCO) for the optional objects task: finds a phone, book, laptop, …
+  // int8 matches float32's accuracy here at ~280 ms vs ~400 ms a frame and 7.5 MB vs 23 MB.
+  ["efficientdet_lite2_int8.tflite", 7_515_971, "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/efficientdet_lite2.tflite"],
 ];
 
 await mkdir(new URL("wasm/", out), { recursive: true });

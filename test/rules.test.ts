@@ -12,6 +12,7 @@ function frame(opts: {
   faces?: number;
   yaw?: number; // degrees, + = own left; written into the matrix
   blends?: Record<string, number>;
+  objects?: { categoryName: string; score: number }[];
 }): FrameMessage {
   const faces = opts.faces ?? (opts.pose === false ? 0 : 1);
   const [lw, rw] = opts.wristY ?? [0.8, 0.8];
@@ -43,6 +44,7 @@ function frame(opts: {
       faceBlendshapes: Array.from({ length: faces }, () => ({ categories, headIndex: -1, headName: "" })),
       facialTransformationMatrixes: Array.from({ length: faces }, () => matrix),
     },
+    ...(opts.objects && { objects: opts.objects.map((o) => ({ ...o, box: { x: 0.4, y: 0.6, w: 0.1, h: 0.2 } })) }),
   };
 }
 
@@ -85,6 +87,18 @@ test("absent needs 10 empty frames; two faces raise multiple_people", () => {
   let out: string[] = [];
   for (let i = 0; i < 6; i++) out = d2.feed(frame({ seq: i, faces: 2 })).map((e) => e.event);
   expect(out).toEqual(["multiple_people"]);
+});
+
+test("a detected phone fires the phone event; a low score or a book does not", () => {
+  expect(signals(frame({ objects: [{ categoryName: "cell phone", score: 0.6 }] })).phone).toBe(true);
+  expect(signals(frame({ objects: [{ categoryName: "cell phone", score: 0.2 }] })).phone).toBe(false);
+  expect(signals(frame({ objects: [{ categoryName: "book", score: 0.9 }] })).phone).toBe(false);
+  expect(signals(frame({})).phone).toBe(false); // objects task off
+
+  const d = new Detector({ pid: "p1" });
+  let out: string[] = [];
+  for (let i = 0; i < 4; i++) out = d.feed(frame({ seq: i, objects: [{ categoryName: "cell phone", score: 0.6 }] })).map((e) => e.event);
+  expect(out).toEqual(["phone"]);
 });
 
 test("close() ends whatever is still firing", () => {

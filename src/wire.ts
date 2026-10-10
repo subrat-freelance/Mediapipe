@@ -18,6 +18,12 @@ const landmark = z.object({
 const category = z.object({ index: z.number(), score: z.number(), categoryName: name, displayName: name });
 const classifications = z.object({ categories: z.array(category).max(60), headIndex: z.number(), headName: name });
 const matrix = z.object({ rows: z.number(), columns: z.number(), data: z.array(z.number()).length(16) });
+// A detected object (a phone, a book, …). Box is normalised 0..1 to the analysed frame, like the landmarks.
+const object = z.object({
+  categoryName: name,
+  score: z.number(),
+  box: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+});
 
 const envelope = { v: z.literal(WIRE_VERSION), seq: z.int().nonnegative(), ts: z.number() };
 
@@ -35,6 +41,8 @@ const frame = z.object({
     faceBlendshapes: z.array(classifications).max(4),
     facialTransformationMatrixes: z.array(matrix).max(4),
   }),
+  // Present (possibly empty) only when object detection is on; "person" is left out (pose/face cover it).
+  objects: z.array(object).max(10).optional(),
   truncated: z.literal(true).optional(),
 });
 

@@ -61,6 +61,7 @@ const vision = await startVision({
   fps: 2,                   // default 2, at most 5
   width: 320,               // default 320, height follows the camera's aspect ratio
   faceMesh: false,          // default false
+  objects: false,           // default false; true adds the phone/object detector (see below)
   maxBytes: 60_000,         // default
   delegate: "CPU",          // default
   onPayload: (msg) => {},   // optional local tap: every message, as an object
@@ -261,30 +262,42 @@ before it fires, and be false for 2 frames before it ends.
 | Event | Fires when | Hold | Basis |
 |---|---|---|---|
 | `hand_raised` (`detail.hand`: left/right/both) | a wrist above the eyes and above its own elbow | 3 | pose — **reliable** |
+| `phone` | a phone detected (objects task on) | 4 | object detector — **real**, see below |
 | `multiple_people` (`detail.faces`) | two or more faces | 6 | face count — **reliable** |
 | `absent` | no face **and** no body | 10 | pose + face — **reliable** |
 | `looking_away` (`detail.yaw`, `pitch`) | head yaw > 25° or pitch > 20° off-centre | 12 | head matrix — reliable for yaw |
 | `hand_to_face` | a wrist within 0.17 of the nose | 4 | pose — proxy (phone-to-ear, chin rest) |
-| `looking_down` | `eyeLookDown` blendshapes high | 6 | gaze — proxy (see below) |
+| `looking_down` | `eyeLookDown` blendshapes high | 6 | gaze — proxy |
 | `eyes_closed` | `eyeBlink` blendshapes high | 6 | blendshape — untuned |
 | `talking` | `jawOpen` high | 2 | blendshape — untuned |
 
-### "Checking a phone" — what this build can and cannot do
+### Phone and object detection (the third task)
 
-**It cannot detect a phone.** There is no object detector and no hand/finger landmarks in this build —
-the plan left both out on purpose (§2). The nearest signal is `looking_down` (gaze dropped) together
-with `hand_to_face` or a lifted hand, and it **also fires for reading notes, writing, or resting a
-chin on a hand**. Use it as a soft flag, not proof.
+Turn it on with `objects: true` on `startVision` (the demo has a "Detect phone/objects" switch, on by
+default). It adds a third MediaPipe task — the **Object Detector** (EfficientDet-Lite2 int8, COCO) —
+which finds a phone, book, laptop and the like. Each frame then carries an `objects` array:
 
-For real phone detection you add a **third MediaPipe task** in the worker (plan §6.3): the Object
-Detector (to find a phone in frame) or the Hand Landmarker (21 finger points, for a hand holding
-something at a reading angle). That is one more `createFromOptions` in `worker.ts`, one more key in
-the frame message, one more entry in the schema, and more bandwidth per frame. Say the word and I
-will add it as a separate task.
+```json
+"objects": [ { "categoryName": "cell phone", "score": 0.76, "box": { "x": 0.44, "y": 0.62, "w": 0.12, "h": 0.2 } } ]
+```
 
-The thresholds in `rules.ts` (angles, blendshape cut-offs, the 0.17 hand-to-face distance) are
-reasonable defaults measured on stills; **calibrate them against your own camera and distance.**
-`eyes_closed` and `talking` in particular have not been tuned on a live face.
+Boxes are normalised 0..1 to the analysed frame, like the landmarks; `"person"` is left out (pose and
+face already cover people). The `phone` event fires when a `cell phone` scores above 0.35 for 4 frames.
+
+**Measured** on the photos I tested: a clearly held phone scores **0.5–0.82** at the 320 px frame, and
+the box lands on the phone. It is a real detector, not a proxy — but it is not perfect: a phone that is
+small, edge-on or mostly hidden by the hand can score low or be missed (one of my four test images, a
+phone held flat and far, was missed at 320 px). For a stricter signal, combine `phone` with
+`looking_down` / `hand_to_face`.
+
+**Cost:** the objects task adds a one-time **7.5 MB** model download and about **280–300 ms of CPU a
+frame** (so a full frame is ~340 ms with objects on vs ~85 ms off). It still fits the 500 ms budget at
+2 fps on this laptop, but on a slower machine it will pull the whole pipeline below 2 fps — turn it off
+(`objects: false`, the default) to keep pose and face at full rate.
+
+The thresholds in `rules.ts` (angles, blendshape cut-offs, the 0.17 hand-to-face distance, the 0.35
+phone score) are reasonable defaults measured on stills; **calibrate them against your own camera and
+distance.** `eyes_closed` and `talking` in particular have not been tuned on a live face.
 
 ## Measured
 
@@ -316,6 +329,7 @@ Download, once, then cached:
 | `models/pose_landmarker_lite.task` | 5,777,746 | 5.0 MB |
 | `models/face_landmarker.task` | 3,758,596 | 3.3 MB |
 | **Total** | **23.0 MB** | **12.3 MB** |
+| `models/efficientdet_lite2_int8.tflite` (only when `objects` is on) | 7,515,971 | 7.0 MB |
 | The library itself, `dist/index.js` | 5,111 | 2.2 KB |
 
 ## Tested, and not

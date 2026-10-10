@@ -2,6 +2,7 @@ import type { FrameMessage } from "../wire";
 
 type Pose = FrameMessage["pose"];
 type Face = Required<FrameMessage["face"]>;
+type Objects = NonNullable<FrameMessage["objects"]>;
 
 /** What the worker posts back for one frame: MediaPipe's fields, picked out by name. */
 export interface RawResult {
@@ -14,6 +15,7 @@ export interface RawResult {
   faceLandmarks: Face["faceLandmarks"];
   faceBlendshapes: Face["faceBlendshapes"];
   facialTransformationMatrixes: Face["facialTransformationMatrixes"];
+  objects?: Objects; // present only when the objects task is on
 }
 
 export function buildFrame(raw: RawResult, opts: { seq: number; faceMesh: boolean }): FrameMessage {
@@ -30,6 +32,7 @@ export function buildFrame(raw: RawResult, opts: { seq: number; faceMesh: boolea
       faceBlendshapes: raw.faceBlendshapes,
       facialTransformationMatrixes: raw.facialTransformationMatrixes,
     },
+    ...(raw.objects && { objects: raw.objects }),
   };
 }
 
