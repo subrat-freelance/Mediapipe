@@ -239,8 +239,10 @@ nailed down (head-up was not tested), so treat large `|pitch|` as "off-centre", 
 ## Events — the rules layer (`src/consumer/`)
 
 The receiver is a dumb pipe; turning the per-frame JSON into events like "hand raised" is the
-consumer's job (plan §2, §13). `src/consumer/rules.ts` does it, and `src/consumer/watch.ts` runs it
-over the receiver's output:
+consumer's job (plan §2, §13). `src/consumer/rules.ts` does it. **The demo page shows it live** — a
+dashboard of tiles (hand raised, phone, how many people, looking away, …) that light up as each
+condition is confirmed, plus a running event feed — because `rules.ts` is pure and the page imports it
+directly. `src/consumer/watch.ts` runs the same rules over the receiver's output on the server side:
 
 ```powershell
 $env:VISION_DEV=1; npm run dev:rx | npx tsx src/consumer/watch.ts events.ndjson

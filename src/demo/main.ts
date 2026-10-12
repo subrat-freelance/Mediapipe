@@ -1,6 +1,7 @@
 // Demo page: the only place that calls getUserMedia. ?autostart=1&rx=<url> starts without a click.
 import { DrawingUtils, FaceLandmarker, PoseLandmarker } from "@mediapipe/tasks-vision";
 import { connectReceiver, startVision, type FrameMessage, type WireMessage } from "../client/index";
+import { Detector, signals, type Signals, type VisionEvent } from "../consumer/rules";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const query = new URLSearchParams(location.search);
@@ -26,6 +27,71 @@ rxInput.value = query.get("rx") ?? "";
 preview.onloadedmetadata = () => {
   preview.parentElement!.style.aspectRatio = `${preview.videoWidth} / ${preview.videoHeight}`;
 };
+
+// ---- Dashboard: one tile per event, driven by the same rules the receiver log uses. -------------
+// label + the instantaneous signal (lights the tile at once) + optional detail text.
+const topPhone = (m: FrameMessage) =>
+  (m.objects ?? []).filter((o) => o.categoryName === "cell phone").map((o) => o.score).sort((a, b) => b - a)[0];
+const TILES: { ev: string; label: string; live: (s: Signals) => boolean; detail?: (s: Signals, m: FrameMessage) => string }[] = [
+  { ev: "hand_raised", label: "Hand raised", live: (s) => s.leftHandRaised || s.rightHandRaised, detail: (s) => (s.leftHandRaised && s.rightHandRaised ? "both" : s.leftHandRaised ? "left" : "right") },
+  { ev: "phone", label: "Phone", live: (s) => s.phone, detail: (_s, m) => { const p = topPhone(m); return p ? p.toFixed(2) : ""; } },
+  { ev: "multiple_people", label: "Multiple people", live: (s) => s.faces >= 2 },
+  { ev: "looking_away", label: "Looking away", live: (s) => s.lookingAway, detail: (s) => `yaw ${Math.round(s.yaw)}°` },
+  { ev: "looking_down", label: "Looking down", live: (s) => s.gazeDown },
+  { ev: "hand_to_face", label: "Hand to face", live: (s) => s.handToFace },
+  { ev: "eyes_closed", label: "Eyes closed", live: (s) => s.eyesClosed },
+  { ev: "talking", label: "Talking", live: (s) => s.talking },
+  { ev: "absent", label: "Nobody there", live: (s) => !s.present && !s.body },
+];
+
+const tilesEl = $("tiles");
+const feedEl = $("feed");
+for (const t of TILES) {
+  const el = document.createElement("div");
+  el.className = "tile";
+  el.id = `tile-${t.ev}`;
+  el.innerHTML = `<div class="label"><span class="dot"></span>${t.label}</div><div class="detail"></div>`;
+  tilesEl.appendChild(el);
+}
+
+let detector = new Detector({ pid: "demo" });
+const active = new Set<string>(); // events currently firing (held long enough) — matches the log
+let eventCount = 0;
+
+function resetDashboard() {
+  detector = new Detector({ pid: "demo" });
+  active.clear();
+  eventCount = 0;
+  $("feed-count").textContent = "0";
+  feedEl.innerHTML = `<li class="empty">No events yet. Start, then raise a hand or hold up a phone.</li>`;
+  $("people-count").textContent = "—";
+  renderTiles(null, null);
+}
+
+function addFeed(ev: VisionEvent) {
+  if (eventCount === 0) feedEl.innerHTML = "";
+  eventCount++;
+  $("feed-count").textContent = String(eventCount);
+  const li = document.createElement("li");
+  const time = new Date(ev.ts).toLocaleTimeString();
+  const detail = ev.detail ? Object.entries(ev.detail).map(([k, v]) => `${k} ${v}`).join(", ") : "";
+  li.innerHTML = `<span class="t">${time}</span><span class="s-${ev.state}">${ev.event} ${ev.state}</span><span>${detail}</span>`;
+  feedEl.prepend(li);
+  while (feedEl.children.length > 40) feedEl.lastChild!.remove();
+}
+
+/** Paint every tile: amber fill = confirmed event, amber outline = signal live but not held yet. */
+function renderTiles(s: Signals | null, m: FrameMessage | null) {
+  for (const t of TILES) {
+    const el = $(`tile-${t.ev}`);
+    const on = active.has(t.ev);
+    const live = !!s && t.live(s);
+    el.classList.toggle("on", on);
+    el.classList.toggle("live", live && !on);
+    const text = s && m && (live || on) && t.detail ? t.detail(s, m) : "";
+    el.querySelector<HTMLElement>(".detail")!.textContent = [text, on ? "held" : ""].filter(Boolean).join(" · ");
+  }
+}
 
 // Long arrays collapsed; the 16 matrix numbers stay readable.
 const collapse = (_k: string, v: unknown) =>
@@ -71,14 +137,28 @@ function show(json: string, ok: boolean) {
   $("json").textContent = JSON.stringify(msg, collapse, 2);
 
   if (msg.type === "status") {
-    $("state").textContent = [msg.state, msg.reason, msg.detail].filter(Boolean).join(" — ");
+    $("state").textContent = msg.state;
+    $("status-extra").textContent = [msg.reason, msg.detail].filter(Boolean).join(" — ");
+    if (msg.state === "stopped") {
+      for (const ev of detector.close(msg.ts, msg.seq)) (active.delete(ev.event), addFeed(ev));
+      renderTiles(null, null);
+    }
   } else {
+    $("state").textContent = "running";
+    $("status-extra").textContent = "";
     $("infer").textContent = `${msg.infer_ms} ms`;
-    $("people").textContent = `${msg.pose.landmarks.length} / ${msg.face.faceBlendshapes.length}`;
+    $("poses").textContent = `${msg.pose.landmarks.length} / ${msg.face.faceBlendshapes.length}`;
     $("objects-out").textContent = msg.objects
       ? msg.objects.map((o) => `${o.categoryName} ${o.score.toFixed(2)}`).join(", ") || "none"
       : "off";
     paint(msg);
+
+    // Dashboard: feed the detector (confirmed events) and show the live signals.
+    for (const ev of detector.feed(msg)) (ev.state === "start" ? active.add(ev.event) : active.delete(ev.event), addFeed(ev));
+    const s = signals(msg);
+    $("people-count").textContent = String(msg.face.faceBlendshapes.length);
+    $("tile-people").classList.toggle("on", msg.face.faceBlendshapes.length >= 2);
+    renderTiles(s, msg);
   }
 }
 
@@ -86,6 +166,7 @@ async function start() {
   const undo: (() => void)[] = [];
   sent = dropped = 0;
   recent = [];
+  resetDashboard();
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
     undo.push(() => stream.getTracks().forEach((t) => t.stop()));
